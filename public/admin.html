@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quiz Buzzer - Admin</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        input, button {
+            font-size: 1rem;
+            padding: 3px;
+        }
+        button {
+            padding: 3px 10px;
+        }
+
+        #loginForm {
+            width: 300px;
+            text-align: center;
+        }
+        #adminPanel {
+            width: 500px;
+            text-align: center;
+        }
+        #adminPanel {
+            display: none;
+        }
+        #usersList, #resetSection {
+            margin-top: 20px;
+            width: 100%;
+        }
+        .userItem {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+        .userItem > span {
+            padding: 3px 10px 3px 0;
+        }
+        .pendingNameChange {
+            color: orange;
+        }
+        .tabs {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 20px;
+        }
+        .tab {
+            cursor: pointer;
+            padding: 10px 20px;
+            border: 1px solid #ccc;
+            border-bottom: none;
+            background-color: #f9f9f9;
+            width: 100%;
+        }
+        .active-tab {
+            background-color: #fff;
+            font-weight: bold;
+        }
+        .tab-content {
+            display: none;
+        }
+        .active-content {
+            display: block;
+        }
+        .teamDescription {
+            margin-left: 10px;
+            color: #999;
+        }
+    </style>
+</head>
+<body>
+    <div id="loginForm">
+        <h2>Admin Login</h2>
+        <input type="password" id="passwordInput" placeholder="Enter password">
+        <button id="loginButton">Login</button>
+    </div>
+
+    <div id="adminPanel">
+        <h2>Admin Panel</h2>
+
+        <!-- Tabs for navigation -->
+        <div class="tabs">
+            <div id="manageTab" class="tab active-tab">Manage Users</div>
+            <div id="resetTab" class="tab">Reset Buzzer</div>
+        </div>
+
+        <!-- Content for managing users -->
+        <div id="manageContent" class="tab-content active-content">
+            <div id="usersList"></div>
+        </div>
+
+        <!-- Content for resetting buzzer -->
+        <div id="resetContent" class="tab-content">
+            <button id="resetButton">Reset Buzzer</button>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const loginForm = document.getElementById('loginForm');
+        const adminPanel = document.getElementById('adminPanel');
+        const passwordInput = document.getElementById('passwordInput');
+        const loginButton = document.getElementById('loginButton');
+        const resetButton = document.getElementById('resetButton');
+        const usersList = document.getElementById('usersList');
+        const manageTab = document.getElementById('manageTab');
+        const resetTab = document.getElementById('resetTab');
+        const manageContent = document.getElementById('manageContent');
+        const resetContent = document.getElementById('resetContent');
+        let authHeader = '';
+
+        // Toggle tab functionality
+        manageTab.addEventListener('click', () => {
+            switchTab(manageTab, manageContent);
+        });
+
+        resetTab.addEventListener('click', () => {
+            switchTab(resetTab, resetContent);
+        });
+
+        function switchTab(tab, content) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active-tab'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active-content'));
+            tab.classList.add('active-tab');
+            content.classList.add('active-content');
+        }
+
+        loginButton.addEventListener('click', () => {
+            const password = passwordInput.value;
+            authHeader = 'Basic ' + btoa('admin:' + password);
+            fetch('/admin/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': authHeader },
+                body: JSON.stringify({ password })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    loginForm.style.display = 'none';
+                    adminPanel.style.display = 'block';
+                    fetchUsers();
+                } else {
+                    alert('Invalid password');
+                }
+            });
+        });
+
+        resetButton.addEventListener('click', () => {
+            if (confirm('Are you sure you want to reset the buzzer?')) {
+                fetch('/admin/reset', { method: 'POST', headers: {'Authorization': authHeader} })
+                    .then(response => response.json());
+            }
+        });
+
+        function fetchUsers() {
+            fetch('/admin/users', { headers: { 'Authorization': authHeader } })
+                .then(response => response.json())
+                .then(users => {
+                    updateUsersList(users);
+                });
+        }
+
+        const dummy = document.createElement('div');
+        function htmlentities(val) {
+            dummy.textContent = val;
+
+            return dummy.innerHTML;
+        }
+
+        usersList.addEventListener('click', function (e) {
+            const target = e.target.closest('[data-action]');
+            if (!target) {
+                return;
+            }
+
+            const action = target.dataset.action;
+            const data = target.closest('div').dataset;
+            const {teamName, description, pendingNameChange} = data;
+
+            if ('removeUser' === action) {
+                removeUser(teamName);
+            } else if ('editUser' === action) {
+                editUser(teamName, description);
+            } else if ('approveUser' === action) {
+                approveUser(teamName);
+            } else if ('approveNameChange' === action) {
+                nameChangeAction(teamName, pendingNameChange, true);
+            } else if ('rejectNameChange' === action) {
+                nameChangeAction(teamName, pendingNameChange, false);
+            }
+        });
+
+        function updateUsersList(users) {
+            usersList.innerHTML = '';
+            users.forEach(([pin, userData]) => {
+                const userItem = document.createElement('div');
+                const teamName = htmlentities(userData.teamName);
+                const description = htmlentities(userData.description);
+                const pendingNameChange = htmlentities(userData.pendingNameChange);
+                userItem.className = 'userItem';
+                userItem.innerHTML = `
+                    <span>${teamName}${userData.pendingNameChange ? ` (${userData.pendingNameChange})` : ''}<span class="teamDescription">${description}</span></span>
+
+                    <div data-team-name="${teamName}" data-pending-name-change="${pendingNameChange}" data-description="${description}">
+                        ${userData.approved ?
+                            `<button data-action="removeUser">Remove</button>
+                            <button data-action="editUser">Edit</button>` :
+                            `<button data-action="approveUser">Approve</button>`
+                        }
+                        ${userData.pendingNameChange ?
+                            `<button data-action="approveNameChange">Approve Name</button>
+                             <button data-action="rejectNameChange">Reject Name</button>` :
+                            ''
+                        }
+                    </div>
+                `;
+                usersList.appendChild(userItem);
+            });
+        }
+
+        function editUser(oldName, oldDescription) {
+            const newName = prompt('Enter new team name:', oldName);
+			if (null === newName) {
+				return;
+			}
+            const description = prompt('Enter team description:', oldDescription);
+			if (null === description) {
+				return;
+			}
+            if (newName && (newName !== oldName || description !== oldDescription)) {
+                fetch('/admin/editUser', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': authHeader },
+                    body: JSON.stringify({ oldName, newName, description })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        fetchUsers();
+                    } else {
+                        alert('Error updating team: ' + data.error);
+                    }
+                });
+            }
+        }
+
+        function removeUser(teamName) {
+            if (confirm(`Are you sure you want to remove the team "${teamName}"?`)) {
+                fetch('/admin/removeUser', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': authHeader },
+                    body: JSON.stringify({ teamName })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        fetchUsers();
+                    }
+                });
+            }
+        }
+
+        function approveUser(teamName) {
+            fetch('/admin/approve', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': authHeader },
+                body: JSON.stringify({ teamName, approve: true })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    fetchUsers();
+                }
+            });
+        }
+
+        function nameChangeAction(oldName, newName, action) {
+            fetch('/admin/approveNameChange', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': authHeader },
+                body: JSON.stringify({ oldName, newName, approve: false })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    fetchUsers();
+                }
+            });
+        }
+
+        socket.on('updateUsers', (users) => {
+            updateUsersList(users);
+        });
+
+        socket.on('nameChangeRequest', ({ oldName, newName }) => {
+            fetchUsers();
+        });
+
+        socket.on('nameChangeApproved', ({ oldName, newName }) => {
+            fetchUsers();
+        });
+    </script>
+</body>
+</html>
+

@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Quiz Buzzer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+            touch-action: none;
+            user-select: none;
+        }
+        input, button {
+            font-size: 1rem;
+            padding: 3px;
+        }
+        button {
+            padding: 3px 10px;
+        }
+        #registrationForm, #buzzerContainer {
+            display: none;
+            text-align: center;
+            margin-bottom: 50px;
+        }
+        #teamNameContainer {
+            margin-bottom: 20px;
+            font-size: 24px;
+        }
+        #teamDescriptionContainer {
+            margin-bottom: 20px;
+            font-size: 16px;
+            color: #999;
+            display: none;
+        }
+        #changeRegistration {
+            cursor: pointer;
+            position: absolute;
+            top: 10px;
+            right: 10px;
+        }
+        #teamNameInput {
+            font-size: 16px;
+            padding: 3px;
+        }
+        #registerButton {
+            font-size: 16px;
+            padding: 3px 10px;
+        }
+        #buzzerButton {
+            width: 80vw;
+            height: 80vw;
+            max-width: 300px;
+            max-height: 300px;
+            background-color: #ff4136;
+            border: none;
+            border-radius: 20px;
+            font-size: 24px;
+            color: white;
+            cursor: pointer;
+            transition: transform 0.1s;
+            touch-action: manipulation;
+            touch-action: none;
+            user-select: none;
+        }
+        #buzzerButton:active:not(:disabled) {
+            transform: scale(0.95);
+        }
+        #buzzerButton:disabled {
+            pointer-events: none;
+            background-color: #cccccc;
+            cursor: not-allowed;
+            transition: none;
+        }
+        @media (orientation: landscape) {
+            body {
+                flex-direction: row;
+            }
+            #teamNameContainer {
+                padding-right: 20px;
+            }
+            #buzzerButton {
+                width: 40vw;
+                height: 40vw;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="registrationForm">
+        <h2>Register Your Team</h2>
+        <input type="text" id="teamNameInput" placeholder="Enter team name">
+        <button id="registerButton">Register</button>
+    </div>
+    <div id="buzzerContainer">
+        <div id="teamNameContainer">
+            <span id="teamNameDisplay"></span>
+            <span id="changeRegistration">✎</span>
+        </div>
+        <div id="teamDescriptionContainer">
+        </div>
+        <button id="buzzerButton">BUZZ!</button>
+    </div>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        let teamName = "";
+        let teamPin = "";
+        let lastBuzzTime = 0;
+        let reconnectionInterval;
+        const buzzerButton = document.getElementById("buzzerButton");
+
+        function registerTeam() {
+            teamName = document.getElementById("teamNameInput").value.trim();
+            if (teamName) {
+                document.getElementById("teamNameInput").disabled = true;
+                document.getElementById("registerButton").disabled = true;
+                fetch("/register", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        teamName,
+                        socketId: socket.id
+                    })
+                })
+                    .then((response) => response.json())
+                    .then((data) => {
+                        if (data.success) {
+                            teamPin = data.pin;
+                            localStorage.setItem("teamName", teamName);
+                            localStorage.setItem("teamPin", teamPin);
+                        } else {
+                            alert("Registration failed: " + data.error);
+                            document.getElementById("teamNameInput").disabled = false; // Re-enable input
+                            document.getElementById("registerButton").disabled = false; // Re-enable button
+                        }
+                    });
+            }
+        }
+
+        function attemptReconnection() {
+            if (!socket.connected) {
+                reRegister();
+            } else {
+                clearInterval(reconnectionInterval);
+            }
+        }
+
+        socket.on("registrationApproved", (data) =>
+            showBuzzer(data.teamName, data.description)
+        );
+        socket.on("registrationRemoved", (data) => showRegistrationForm(data.teamName));
+        socket.on("teamUpdated", ({ teamName, description }) => {
+            showBuzzer(teamName, description, null);
+        });
+        function showBuzzer(teamName, description = "", hasPressed = false) {
+            document.getElementById("registrationForm").style.display = "none";
+            document.getElementById("buzzerContainer").style.display = "block";
+            document.getElementById("teamNameDisplay").textContent = teamName;
+            document.getElementById("teamDescriptionContainer").textContent = description;
+            if (null !== hasPressed) {
+                buzzerButton.disabled = hasPressed;
+            }
+        }
+        function showRegistrationForm(teamName = "") {
+            document.getElementById("buzzerContainer").style.display = "none";
+            document.getElementById("registrationForm").style.display = "block";
+            const teamNameInput = document.getElementById("teamNameInput");
+            teamNameInput.value = teamName;
+            teamNameInput.disabled = false;
+            document.getElementById("registerButton").disabled = false;
+        }
+        function reRegister() {
+            teamName = localStorage.getItem("teamName");
+            teamPin = localStorage.getItem("teamPin");
+            if (teamName && teamPin) {
+                fetch("/reRegister", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        teamName,
+                        pin: teamPin,
+                        socketId: socket.id
+                    })
+                })
+                    .then((response) => response.json())
+                    .then((data) => {
+                        if (data.success) {
+                            showBuzzer(data.teamName, data.description, data.hasPressed);
+                        } else {
+                            showRegistrationForm(teamName);
+                        }
+                    });
+            } else {
+                showRegistrationForm();
+            }
+        }
+        function buzz() {
+            const now = Date.now();
+            if (now - lastBuzzTime > 1000) {
+                lastBuzzTime = now;
+                socket.emit("buzzerPress", {
+                    pin: teamPin,
+                    teamName
+                });
+                buzzerButton.disabled = true;
+                if ("vibrate" in navigator) {
+                    navigator.vibrate(200);
+                }
+            }
+        }
+        document
+            .getElementById("registerButton")
+            .addEventListener("click", registerTeam);
+        buzzerButton.addEventListener("click", buzz);
+        buzzerButton.addEventListener("touchstart", buzz);
+        socket.on("reset", () => {
+            buzzerButton.disabled = false;
+            lastBuzzTime = 0;
+        });
+        document.getElementById("changeRegistration").addEventListener("click", () => {
+            const newName = prompt("Enter new team name:");
+            if (newName && newName !== teamName) {
+                fetch("/changeTeamName", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        oldName: teamName,
+                        newName,
+                        pin: teamPin
+                    })
+                })
+                    .then((response) => response.json())
+                    .then((data) => {
+                        if (data.success) {
+                            alert(data.message);
+                        } else {
+                            alert("Name change failed: " + data.error);
+                        }
+                    });
+            }
+        });
+
+        socket.on('disconnect', () => {
+            reconnectionInterval = setInterval(attemptReconnection, 5000);
+        });
+
+        socket.on('connect', () => {
+            clearInterval(reconnectionInterval);
+            reRegister();
+        });
+
+        window.addEventListener("beforeunload", (e) => {
+            e.preventDefault();
+            e.returnValue = "";
+        });
+
+        // Prevent page dragging on mobile
+        document.addEventListener("touchmove", (e) => e.preventDefault(), {
+            passive: false
+        });
+
+        // Lock orientation to portrait if possible
+        if (screen.orientation && screen.orientation.lock) {
+            screen.orientation.lock("portrait").catch(() => {});
+        }
+    </script>
+</body>
+</html>

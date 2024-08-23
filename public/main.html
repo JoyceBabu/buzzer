@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quiz Buzzer - Main Screen</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        #result {
+            font-size: 48px;
+            text-align: center;
+        }
+        #historyIcon {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            font-size: 24px;
+            cursor: pointer;
+        }
+        #pressesList {
+            position: absolute;
+            top: 60px;
+            right: 20px;
+            width: 300px;
+            max-height: 80vh;
+            overflow-y: auto;
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            display: none;
+        }
+        .pressItem {
+            padding: 10px;
+            border-bottom: 1px solid #f0f0f0;
+            display: flex;
+            justify-content: space-between;
+        }
+        .timestamp {
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div id="result">Waiting for buzzer press...</div>
+    <div id="historyIcon">📜</div>
+    <div id="pressesList"></div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="confetti.browser.min.js"></script>
+    <script>
+        const primaryNotificationVolume = 0.4;
+        const secondaryNotificationVolume = 0.5;
+
+        const socket = io();
+        const resultElement = document.getElementById('result');
+        const pressesListElement = document.getElementById('pressesList');
+        const historyIconElement = document.getElementById('historyIcon');
+        let buzzerSound = new Audio('buzzer.mp3');
+        let subsequentBuzzerSound = new Audio('buzzer-2.mp3');
+        let speechSynthesis = window.speechSynthesis;
+
+        buzzerSound.volume = primaryNotificationVolume;
+        subsequentBuzzerSound.volume = secondaryNotificationVolume;
+
+        function formatDate(date) {
+            const hours = date.getHours();
+            const minutes = date.getMinutes();
+            const seconds = date.getSeconds();
+            const milliseconds = date.getMilliseconds();
+            const ampm = hours >= 12 ? 'PM' : 'AM';
+
+            return `${hours % 12 || 12}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')} ${ampm}`;
+        }
+
+        function updatePresses(presses) {
+            pressesListElement.innerHTML = '';
+            presses.forEach((press, index) => {
+                const pressItem = document.createElement('div');
+                pressItem.className = 'pressItem';
+                const date = new Date(press.timestamp);
+                const formattedTime = `<span class="timestamp">${formatDate(date)}</span>`;
+                pressItem.innerHTML = `${press.teamName}  ${formattedTime}`;
+                pressesListElement.appendChild(pressItem);
+
+                if (index > 0) {
+                    const audio = subsequentBuzzerSound.cloneNode(true);
+                    audio.volume = secondaryNotificationVolume;
+                    audio.play();
+                }
+            });
+        }
+
+        function buzzerPressed({teamName, description}) {
+            resultElement.textContent = teamName;
+            setTimeout(() => speak(teamName + (description ? ` - ${description}` : '')), 1000);
+            confetti();
+            buzzerSound.play();
+        }
+
+        socket.on('buzzerPressed', buzzerPressed);
+
+        socket.on('updatePresses', updatePresses);
+
+        socket.on('reset', () => {
+            resultElement.textContent = 'Waiting for buzzer press...';
+            pressesListElement.innerHTML = '';
+        });
+
+        window.addEventListener('load', () => {
+            fetch('/history')
+                .then(response => response.json())
+                .then(presses => {
+                    if (presses.length === 0) {
+                        return;
+                    }
+
+                    resultElement.textContent = presses[0].teamName;
+                    updatePresses(presses);
+                });
+        });
+
+        historyIconElement.addEventListener('click', () => {
+            pressesListElement.style.display = pressesListElement.style.display === 'none' ? 'block' : 'none';
+        });
+
+        function speak(text) {
+            const utterance = new SpeechSynthesisUtterance(text);
+            speechSynthesis.speak(utterance);
+        }
+    </script>
+</body>
+</html>
