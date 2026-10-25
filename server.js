@@ -4,6 +4,7 @@ const http = require("http").createServer(app);
 const io = require("socket.io")(http);
 const crypto = require("crypto");
 const fs = require("fs").promises;
+const os = require("os");
 const path = require("path");
 
 const publicDir = path.join(__dirname, "public");
@@ -350,10 +351,38 @@ io.on("connection", (socket) => {
 });
 
 const port = process.env.PORT || 3000;
+
+const roles = [
+  { label: "User", path: "/" },
+  { label: "Main", path: "/main" },
+  { label: "Admin", path: "/admin" },
+];
+
+// IPv4 only: IPv6 link-local addresses need a zone ID that phone browsers
+// won't accept.
+function getLanAddresses() {
+  return Object.values(os.networkInterfaces())
+    .flat()
+    .filter((iface) => iface.family === "IPv4" && !iface.internal)
+    .map((iface) => iface.address);
+}
+
+function logRoleUrls() {
+  const hosts = ["localhost", ...getLanAddresses()];
+  const labelWidth = Math.max(...roles.map(({ label }) => label.length)) + 3;
+  for (const { label, path: rolePath } of roles) {
+    hosts.forEach((host, index) => {
+      const prefix = index === 0 ? `${label}:` : "";
+      console.log(`${prefix.padEnd(labelWidth)}http://${host}:${port}${rolePath}`);
+    });
+  }
+}
+
 // Load saved state first so early clients don't see an empty game.
 loadState().then(() => {
   http.listen(port, () => {
-    console.log(`Server running on port ${port}`);
+    console.log(`Server running on port ${port}\n`);
+    logRoleUrls();
     if (!process.env.ADMIN_PASSWORD) {
       console.log(`Admin password (set ADMIN_PASSWORD to choose one): ${adminPassword}`);
     }

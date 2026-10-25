@@ -14,6 +14,8 @@ node server.js
 - Main Screen - http://localhost:3000/main
 - Admin Screen - http://localhost:3000/admin
 
+On start, the server prints the URL for each screen at `localhost` and at every LAN IPv4 address of the machine, so you can share the LAN URLs with players directly.
+
 ## Password
 
 Set the admin password with the `ADMIN_PASSWORD` environment variable:
